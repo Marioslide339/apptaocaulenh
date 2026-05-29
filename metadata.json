@@ -1,0 +1,6 @@
+{
+  "name": "AI System Instruction Generator",
+  "description": "Biến ý tưởng hoặc hình ảnh thành các câu lệnh System Instruction chuyên nghiệp cho Google AI Studio",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
