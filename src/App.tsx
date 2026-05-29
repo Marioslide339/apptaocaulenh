@@ -246,8 +246,7 @@ export default function App() {
       });
 
       const fallbackList = ['gemini-3-flash-preview', 'gemini-3-pro-preview', 'gemini-2.5-flash'];
-      const startIndex = fallbackList.indexOf(selectedModel);
-      const modelsToTry = startIndex !== -1 ? fallbackList.slice(startIndex) : fallbackList;
+      const modelsToTry = [selectedModel, ...fallbackList.filter(m => m !== selectedModel)];
 
       const callApiWithRetry = async (promptContents: any) => {
         let lastErr: any = null;
@@ -276,13 +275,19 @@ export default function App() {
         return { text: responseText, model: successModel };
       };
 
-      // STEP 1
-      setStepsStatus(s => ({ ...s, step1: 'processing' }));
-      let contentStep1: any;
+      setStepsStatus({ step1: 'processing', step2: 'waiting', step3: 'waiting' });
+      
+      let contentCombined: any;
       if (activeTab === 'text') {
-        contentStep1 = [
-          { text: "Nhiệm vụ: Dựa trên ý tưởng sau, hãy xác định chuyên gia phù hợp (Role) và mục tiêu cốt lõi (Objective) cho AI. Trả về định dạng Markdown với 2 mục: '## 1. Role' và '## 2. Objective'." },
-          { text: `Ý tưởng: "${textInput}"` }
+        contentCombined = [
+          { text: `Nhiệm vụ: Dựa trên ý tưởng sau, hãy phân tích và thiết kế một System Instruction chuyên nghiệp cho bot AI.
+Yêu cầu bắt buộc phải chia tài liệu Markdown làm 3 phần rõ ràng:
+1. Xác định chuyên gia phù hợp (Role) và mục tiêu cốt lõi (Objective). (Ghi tiêu đề '## 1. Role' và '## 2. Objective')
+2. Xây dựng Quy tắc & Hướng dẫn nghiệp vụ (Guidelines) và Phong cách giao tiếp (Tone). (Ghi tiêu đề '## 3. Guidelines & Rules' và '## 4. Tone & Persona')
+3. Tổng hợp lại cấu trúc đầu ra hoàn chỉnh. (Ghi tiêu đề '## 5. Output Format')
+
+Đặt tiêu đề trên cùng là '# Custom System Instruction: [Tên Role]'.
+Ý tưởng của tôi: "${textInput}"` }
         ];
       } else {
         const imageParts = selectedImages.map(img => ({
@@ -291,59 +296,49 @@ export default function App() {
             data: img.data.split(',')[1],
           }
         }));
-        contentStep1 = {
+        contentCombined = {
            parts: [
              ...imageParts,
-             { text: `Nhiệm vụ: Dựa trên các hình ảnh sau, hãy xác định chuyên gia phù hợp (Role) và mục tiêu cốt lõi (Objective) cho AI. Trả về định dạng Markdown với 2 mục: '## 1. Role' và '## 2. Objective'.\nÝ tưởng bổ sung: "${textInput}"` }
+             { text: `Nhiệm vụ: Dựa trên các hình ảnh sau và ý tưởng bổ sung, hãy thiết kế một System Instruction chuyên nghiệp cho bot AI.
+Yêu cầu bắt buộc phải chia tài liệu Markdown làm 3 phần rõ ràng:
+1. Xác định chuyên gia phù hợp (Role) và mục tiêu cốt lõi (Objective). (Ghi tiêu đề '## 1. Role' và '## 2. Objective')
+2. Xây dựng Quy tắc & Hướng dẫn nghiệp vụ (Guidelines) và Phong cách giao tiếp (Tone). (Ghi tiêu đề '## 3. Guidelines & Rules' và '## 4. Tone & Persona')
+3. Tổng hợp lại cấu trúc đầu ra hoàn chỉnh. (Ghi tiêu đề '## 5. Output Format')
+
+Đặt tiêu đề trên cùng là '# Custom System Instruction: [Tên Role]'.
+Ý tưởng bổ sung: "${textInput}"` }
            ]
         };
       }
       
-      let s1Res = "";
+      let finalRes = "";
       let finalModel = selectedModel;
+
       try {
-        const r1 = await callApiWithRetry(contentStep1);
-        s1Res = r1.text;
-        finalModel = r1.model;
-        setStepsStatus(s => ({ ...s, step1: 'completed', step2: 'processing' }));
+        let currentStep: 'step1'|'step2'|'step3' = 'step1';
+        const timer1 = setTimeout(() => { currentStep = 'step2'; setStepsStatus(s => ({ ...s, step1: 'completed', step2: 'processing' })) }, 1500);
+        const timer2 = setTimeout(() => { currentStep = 'step3'; setStepsStatus(s => ({ ...s, step2: 'completed', step3: 'processing' })) }, 3000);
+
+        const res = await callApiWithRetry(contentCombined);
+        
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+
+        finalRes = res.text;
+        finalModel = res.model;
+        setStepsStatus({ step1: 'completed', step2: 'completed', step3: 'completed' });
       } catch (err: any) {
-        setStepsStatus(s => ({ ...s, step1: 'error' }));
+        setStepsStatus(s => {
+           const newS = { ...s };
+           if (newS.step1 === 'processing') newS.step1 = 'error';
+           else if (newS.step2 === 'processing') newS.step2 = 'error';
+           else if (newS.step3 === 'processing') newS.step3 = 'error';
+           return newS;
+        });
         throw err;
       }
 
-      // STEP 2
-      let s2Res = "";
-      try {
-        const contentStep2 = [
-          { text: "Nhiệm vụ: Dựa trên thông tin Role và Objective sau đây, hãy viết ra Quy tắc & Hướng dẫn nghiệp vụ (Guidelines & Rules) và Phong cách giao tiếp (Tone & Persona) để bot không bị ảo tưởng hoặc lạc đề. Trả về định dạng Markdown với 2 mục: '## 3. Guidelines & Rules' và '## 4. Tone & Persona'." },
-          { text: `Role & Objective:\n${s1Res}` }
-        ];
-        const r2 = await callApiWithRetry(contentStep2);
-        s2Res = r2.text;
-        finalModel = r2.model;
-        setStepsStatus(s => ({ ...s, step2: 'completed', step3: 'processing' }));
-      } catch (err: any) {
-        setStepsStatus(s => ({ ...s, step2: 'error' }));
-        throw err;
-      }
-
-      // STEP 3
-      let s3Res = "";
-      try {
-        const contentStep3 = [
-          { text: "Nhiệm vụ: Dựa trên tất cả thông tin dưới đây, hãy tổng hợp lại thành một System Instruction hoàn chỉnh, mạch lạc. Bổ sung thêm phần '## 5. Output Format' quy định cấu trúc trả lời của bot (Markdown, chia cột, code block...). Đặt tiêu đề trên cùng '# Custom System Instruction: [Tên Role]'. Kết quả trả về phải là một tài liệu Markdown trọn vẹn." },
-          { text: `Thông tin đầu vào:\n${s1Res}\n${s2Res}` }
-        ];
-        const r3 = await callApiWithRetry(contentStep3);
-        s3Res = r3.text;
-        finalModel = r3.model;
-        setStepsStatus(s => ({ ...s, step3: 'completed' }));
-      } catch (err: any) {
-        setStepsStatus(s => ({ ...s, step3: 'error' }));
-        throw err;
-      }
-
-      setGeneratedInstruction(s3Res);
+      setGeneratedInstruction(finalRes);
 
       const titleLabel = textInput.trim() 
         ? (textInput.trim().length > 35 ? textInput.trim().slice(0, 35) + "..." : textInput.trim())
@@ -361,7 +356,7 @@ export default function App() {
         inputType: activeTab,
         inputText: textInput,
         inputImages: activeTab === 'image' ? selectedImages : undefined,
-        outputMarkdown: s3Res,
+        outputMarkdown: finalRes,
         timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' • ' + new Date().toLocaleDateString('vi-VN')
       };
 
